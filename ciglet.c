@@ -33,6 +33,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "ciglet.h"
 
+
+static FP_TYPE* _czt_buf   = NULL;
+static int      _czt_buf_m = 0;
+
+static _CIG_TLS FP_TYPE* _czt_mn_buf   = NULL;
+static _CIG_TLS int      _czt_mn_buf_m = 0;
+
 // fftsg
 void cdft(int n, int isgn, FP_TYPE* a);
 void rdft(int n, int isgn, FP_TYPE* a);
@@ -488,10 +495,15 @@ void cig_fft(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
 void cig_czt(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
   FP_TYPE omega0, int n) {
   int m = pow(2, ceil(log2(n)) + 1);
-  FP_TYPE* buffer = calloc(m * 6, sizeof(FP_TYPE));
-  FP_TYPE* xq = buffer + 0;
-  FP_TYPE* wq = buffer + 2 * m;
-  FP_TYPE* Wq = buffer + 4 * m;
+  if(m > _czt_buf_m) {
+    free(_czt_buf);
+    _czt_buf   = (FP_TYPE*)malloc(m * 6 * sizeof(FP_TYPE));
+    _czt_buf_m = m;
+  }
+  memset(_czt_buf, 0, m * 6 * sizeof(FP_TYPE));
+  FP_TYPE* xq = _czt_buf + 0;
+  FP_TYPE* wq = _czt_buf + 2 * m;
+  FP_TYPE* Wq = _czt_buf + 4 * m;
   Wq[0] = wq[0] = 1.0; Wq[1] = wq[1] = 0;
   for(int i = 1; i < n; i ++) {
     FP_TYPE phi = -0.5 * i * i * omega0;
@@ -537,7 +549,64 @@ void cig_czt(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
     for(int i = 0; i < n; i ++)
       yi[i] = (- xq[i * 2 + 0] * wq[i * 2 + 1] + xq[i * 2 + 1] * wq[i * 2 + 0]) / m;
   }
-  free(buffer);
+}
+
+void cig_czt_mn(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
+  FP_TYPE omega0, int n_in, int n_out) {
+  int mn = n_in + n_out - 1;
+  int m = 1;
+  while(m < mn) m <<= 1;
+
+  if(m > _czt_mn_buf_m) {
+    free(_czt_mn_buf);
+    _czt_mn_buf   = (FP_TYPE*)malloc(m * 4 * sizeof(FP_TYPE));
+    _czt_mn_buf_m = m;
+  }
+  memset(_czt_mn_buf, 0, m * 4 * sizeof(FP_TYPE));
+  FP_TYPE* aq  = _czt_mn_buf;
+  FP_TYPE* hq  = _czt_mn_buf + 2*m;
+
+  hq[0] = 1.0; hq[1] = 0.0;
+  for(int k = 1; k < n_out; k++) {
+    FP_TYPE phi = 0.5 * k * k * omega0;
+    hq[k*2+0] =  cos_3(phi);
+    hq[k*2+1] =  sin_3(phi);
+  }
+  for(int k = 1; k < n_in; k++) {
+    FP_TYPE phi = 0.5 * k * k * omega0;
+    hq[(m-k)*2+0] =  cos_3(phi);
+    hq[(m-k)*2+1] =  sin_3(phi);
+  }
+
+  if(xr) aq[0] += xr[0];
+  if(xi) aq[1] += xi[0];
+  for(int n = 1; n < n_in; n++) {
+    FP_TYPE phi = 0.5 * n * n * omega0;
+    FP_TYPE wr =  cos_3(phi), wi = -sin_3(phi);
+    if(xr) { aq[n*2+0] += xr[n]*wr; aq[n*2+1] += xr[n]*wi; }
+    if(xi) { aq[n*2+0] -= xi[n]*wi; aq[n*2+1] += xi[n]*wr; }
+  }
+
+  cdft(2*m, -1, aq);
+  cdft(2*m, -1, hq);
+  for(int i = 0; i < m; i++) {
+    FP_TYPE re = aq[i*2]*hq[i*2] - aq[i*2+1]*hq[i*2+1];
+    FP_TYPE im = aq[i*2]*hq[i*2+1] + aq[i*2+1]*hq[i*2];
+    aq[i*2]   = re;
+    aq[i*2+1] = im;
+  }
+  cdft(2*m, 1, aq);
+
+  FP_TYPE inv_m = 1.0 / m;
+  if(yr) yr[0] = aq[0] * inv_m;
+  if(yi) yi[0] = aq[1] * inv_m;
+  for(int k = 1; k < n_out; k++) {
+    FP_TYPE phi = 0.5 * k * k * omega0;
+    FP_TYPE wr = cos_3(phi), wi = -sin_3(phi);
+    FP_TYPE gr = aq[k*2]*inv_m, gi = aq[k*2+1]*inv_m;
+    if(yr) yr[k] = gr*wr - gi*wi;
+    if(yi) yi[k] = gr*wi + gi*wr;
+  }
 }
 
 void cig_idft(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi, int n) {

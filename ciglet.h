@@ -39,6 +39,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 #include <math.h>
 
+#ifndef _CIG_TLS
+#  if defined(_MSC_VER)
+#    define _CIG_TLS __declspec(thread)
+#  else
+#    define _CIG_TLS __thread
+#  endif
+#endif
+
 #ifndef CIGLET_SINGLE_FILE
   #include "external/fastapprox-all.h"
 #endif
@@ -616,6 +624,9 @@ static inline void ifft(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
 }
 
 void cig_czt(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi, FP_TYPE omega0, int n);
+
+void cig_czt_mn(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
+  FP_TYPE omega0, int n_in, int n_out);
 
 static inline void czt(FP_TYPE* xr, FP_TYPE* xi, FP_TYPE* yr, FP_TYPE* yi,
   FP_TYPE omega0, int n) {
